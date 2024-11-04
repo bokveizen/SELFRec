@@ -62,7 +62,7 @@ class LGCN_Encoder(nn.Module):
         self.embedding_dict = self._init_model()
         # self.sparse_norm_adj = TorchGraphInterface.convert_sparse_mat_to_tensor(self.norm_adj).cuda()
         self.sparse_norm_adj = TorchGraphInterface.convert_sparse_mat_to_tensor(self.norm_adj)
-        # Gaudi does not support sparse for now
+        # Gaudi does not support sparse for now, convert to dense
         self.sparse_norm_adj = self.sparse_norm_adj.to_dense().to(device)
         
 
@@ -79,7 +79,7 @@ class LGCN_Encoder(nn.Module):
         all_embeddings = [ego_embeddings]
         for k in range(self.layers):
             # ego_embeddings = torch.sparse.mm(self.sparse_norm_adj, ego_embeddings)
-            # use dense mm instead
+            # Gaudi does not support sparse for now, use dense mm instead
             ego_embeddings = torch.mm(self.sparse_norm_adj, ego_embeddings)
             all_embeddings += [ego_embeddings]
         all_embeddings = torch.stack(all_embeddings, dim=1)
@@ -87,5 +87,3 @@ class LGCN_Encoder(nn.Module):
         user_all_embeddings = all_embeddings[:self.data.user_num]
         item_all_embeddings = all_embeddings[self.data.user_num:]
         return user_all_embeddings, item_all_embeddings
-
-
