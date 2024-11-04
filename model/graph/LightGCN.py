@@ -6,6 +6,9 @@ from base.torch_interface import TorchGraphInterface
 from util.loss_torch import bpr_loss,l2_reg_loss
 # paper: LightGCN: Simplifying and Powering Graph Convolution Network for Recommendation. SIGIR'20
 
+import habana_frameworks.torch.core as htcore
+
+device = torch.device("hpu")
 
 class LightGCN(GraphRecommender):
     def __init__(self, conf, training_set, test_set):
@@ -15,8 +18,10 @@ class LightGCN(GraphRecommender):
         self.model = LGCN_Encoder(self.data, self.emb_size, self.n_layers)
 
     def train(self):
-        model = self.model.cuda()
+        # model = self.model.cuda()
+        model = self.model.to(device)        
         optimizer = torch.optim.Adam(model.parameters(), lr=self.lRate)
+        model = torch.compile(model, backend="hpu_backend")
         for epoch in range(self.maxEpoch):
             for n, batch in enumerate(next_batch_pairwise(self.data, self.batch_size)):
                 user_idx, pos_idx, neg_idx = batch
@@ -55,7 +60,11 @@ class LGCN_Encoder(nn.Module):
         self.layers = n_layers
         self.norm_adj = data.norm_adj
         self.embedding_dict = self._init_model()
-        self.sparse_norm_adj = TorchGraphInterface.convert_sparse_mat_to_tensor(self.norm_adj).cuda()
+        # self.sparse_norm_adj = TorchGraphInterface.convert_sparse_mat_to_tensor(self.norm_adj).cuda()
+        self.sparse_norm_adj = TorchGraphInterface.convert_sparse_mat_to_tensor(self.norm_adj)
+        # Gaudi does not support sparse for now
+        self.sparse_norm_adj = self.sparse_norm_adj.to_dense().to(device)
+        
 
     def _init_model(self):
         initializer = nn.init.xavier_uniform_
@@ -69,7 +78,9 @@ class LGCN_Encoder(nn.Module):
         ego_embeddings = torch.cat([self.embedding_dict['user_emb'], self.embedding_dict['item_emb']], 0)
         all_embeddings = [ego_embeddings]
         for k in range(self.layers):
-            ego_embeddings = torch.sparse.mm(self.sparse_norm_adj, ego_embeddings)
+            # ego_embeddings = torch.sparse.mm(self.sparse_norm_adj, ego_embeddings)
+            # use dense mm instead
+            ego_embeddings = torch.mm(self.sparse_norm_adj, ego_embeddings)
             all_embeddings += [ego_embeddings]
         all_embeddings = torch.stack(all_embeddings, dim=1)
         all_embeddings = torch.mean(all_embeddings, dim=1)
